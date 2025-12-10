@@ -17,7 +17,7 @@ from agent import christmas_agent
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("backend.log"),
@@ -55,7 +55,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for dev
+    allow_origin_regex="https?://.*(localhost|run\.app)(:\d+)?|https?://.*\.run\.app|https?://.*\.cloudshell\.dev",
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -70,7 +71,6 @@ class ChatResponse(BaseModel):
     tree_state: dict
     generated_image: Optional[str] = None
 
-# Initialize ADK services with Vertex AI
 # Initialize ADK services with Vertex AI
 AGENT_ENGINE_ID = os.getenv("AGENT_ENGINE_ID")
 USE_MEMORY_BANK = os.getenv("USE_MEMORY_BANK", "false").lower() == "true"
@@ -108,7 +108,6 @@ async def chat_endpoint(
     """
     Chat endpoint that accepts text and an optional image file.
     """
-    print("DEBUG: chat_endpoint called! Code has been reloaded.")
     global CURRENT_SESSION_ID
     
     try:
@@ -169,20 +168,17 @@ async def chat_endpoint(
         
         # Run the agent via the runner
         start_time = time.time()
-        logger.info(f"Starting runner.run at {start_time}")
-        
-        events = runner.run(
-            user_id=user_id,
-            session_id=session_id, 
-            new_message=content
-        )
-        logger.info(f"runner.run initialized in {time.time() - start_time:.4f}s")
+        logger.info(f"Starting runner.run_async at {start_time}")
         
         final_response_text = ""
         generated_image_url = None
-        
+
         # Iterate through events to find the final response
-        for event in events:
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id, 
+            new_message=content
+        ):
             logger.info(f"Event received: {type(event)} - {event}")
             if event.is_final_response():
                 # Extract text from the final response
@@ -210,7 +206,7 @@ async def chat_endpoint(
                                 logger.info(f"Detected recently generated file: {filename}")
                                 # Construct URL
                                 # Assuming backend runs on port 8001
-                                generated_image_url = f"http://localhost:8001/static/{filename}"
+                                generated_image_url = f"/static/{filename}"
                                 # Add a cache buster
                                 generated_image_url += f"?t={int(time.time())}"
                                 break
@@ -220,7 +216,7 @@ async def chat_endpoint(
                         for filename in known_files:
                             if filename in final_response_text:
                                 # Construct URL
-                                generated_image_url = f"http://localhost:8001/static/{filename}"
+                                generated_image_url = f"/static/{filename}"
                                 generated_image_url += f"?t={int(time.time())}"
                                 break
         
